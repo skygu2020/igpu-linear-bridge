@@ -72,12 +72,37 @@ int main(int argc, char **argv) {
 
   struct gbm_device *gbm = gbm_create_device(drm_fd);
   if (!gbm) {
-    fprintf(stderr, "gbm_create_device failed\n");
+    fprintf(stderr, "gbm_create_device(%s) failed\n", node);
     close(drm_fd);
     return 1;
   }
-  fprintf(stderr, "GBM device opened: format=AB24 size=%dx%d modifier=LINEAR\n",
-          width, height);
+
+  // Optional second node: allocate the dma-buf on the first GPU, but create
+  // the EGL display/context on the second GPU to test real cross-GPU import.
+  const char *egl_node = argc > 2 ? argv[2] : node;
+  int egl_drm_fd = drm_fd;
+  struct gbm_device *egl_gbm = gbm;
+  if (argc > 2) {
+    egl_drm_fd = open(egl_node, O_RDWR | O_CLOEXEC);
+    if (egl_drm_fd < 0) {
+      fprintf(stderr, "open EGL device %s: %s\\n", egl_node, strerror(errno));
+      gbm_device_destroy(gbm);
+      close(drm_fd);
+      return 1;
+    }
+    egl_gbm = gbm_create_device(egl_drm_fd);
+    if (!egl_gbm) {
+      fprintf(stderr, "gbm_create_device(%s) failed\\n", egl_node);
+      close(egl_drm_fd);
+      gbm_device_destroy(gbm);
+      close(drm_fd);
+      return 1;
+    }
+  }
+
+  fprintf(stderr,
+          "DMA-BUF allocator: %s; EGL importer: %s; format=AB24 size=%dx%d modifier=LINEAR\\n",
+          node, egl_node, width, height);
 
   const uint64_t linear = DRM_FORMAT_MOD_LINEAR;
   struct gbm_bo *bo =
@@ -119,7 +144,7 @@ int main(int argc, char **argv) {
   }
 
   EGLDisplay display =
-      get_platform_display(EGL_PLATFORM_GBM_KHR, gbm, NULL);
+      get_platform_display(EGL_PLATFORM_GBM_KHR, egl_gbm, NULL);
   if (display == EGL_NO_DISPLAY) {
     print_egl_error("eglGetPlatformDisplayEXT(GBM)");
     close(plane_fd);
@@ -380,6 +405,10 @@ int main(int argc, char **argv) {
   eglTerminate(display);
   close(plane_fd);
   gbm_bo_destroy(bo);
+  if (egl_gbm != gbm) {
+    gbm_device_destroy(egl_gbm);
+    close(egl_drm_fd);
+  }
   gbm_device_destroy(gbm);
   close(drm_fd);
   return dmabuf_fbo_status == GL_FRAMEBUFFER_COMPLETE ? 0 : 15;
