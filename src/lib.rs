@@ -212,7 +212,7 @@ pub unsafe extern "C" fn gbm_bo_create(
     format: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
-    let symbol = unsafe { next(b"gbm_bo_create\\0") };
+    let symbol = unsafe { next(b"gbm_bo_create\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create symbol not found");
         return ptr::null_mut();
