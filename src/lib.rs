@@ -690,7 +690,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
                                 .map(|v| format!("0x{v:016x}"))
                                 .unwrap_or_else(|| "<unavailable>".to_string())
                         );
-                        let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+                        let destroy_symbol = unsafe { next(b"gbm_bo_destroy\0") };
                         if !destroy_symbol.is_null() {
                             let destroy: unsafe extern "C" fn(*mut GbmBo) =
                                 unsafe { std::mem::transmute(destroy_symbol) };
