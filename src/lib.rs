@@ -14,6 +14,31 @@ static LINEAR_FAILURES: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 
+unsafe extern "C" {
+    fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+}
+
+fn raw_stderr(message: &'static [u8]) {
+    unsafe { let _ = write(2, message.as_ptr(), message.len()); }
+}
+
+extern "C" fn bridge_loaded() {
+    raw_stderr(b"[igpu-linear-bridge] loaded\\n");
+}
+
+#[used]
+#[link_section = ".init_array"]
+static BRIDGE_INIT: extern "C" fn() = bridge_loaded;
+
+static FIRST_HOOK_REPORTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn report_first_hook() {
+    if !FIRST_HOOK_REPORTED.swap(true, Ordering::Relaxed) {
+        raw_stderr(b"[igpu-linear-bridge] first GBM hook entered\\n");
+    }
+}
+
 extern "C" fn report_stats() {
     let create = CREATE_CALLS.load(Ordering::Relaxed);
     let modifiers = CREATE_MODIFIERS_CALLS.load(Ordering::Relaxed);
@@ -167,6 +192,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
     modifiers: *const u64,
     count: c_uint,
 ) -> *mut GbmBo {
+    report_first_hook();
     CREATE_MODIFIERS_CALLS.fetch_add(1, Ordering::Relaxed);
     let symbol = unsafe { next(b"gbm_bo_create_with_modifiers\0") };
     if symbol.is_null() {
@@ -215,6 +241,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
     count: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
+    report_first_hook();
     CREATE_MODIFIERS2_CALLS.fetch_add(1, Ordering::Relaxed);
     let symbol = unsafe { next(b"gbm_bo_create_with_modifiers2\0") };
     if symbol.is_null() {
@@ -261,6 +288,7 @@ pub unsafe extern "C" fn gbm_bo_create(
     format: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
+    report_first_hook();
     CREATE_CALLS.fetch_add(1, Ordering::Relaxed);
     let symbol = unsafe { next(b"gbm_bo_create\0") };
     if symbol.is_null() {
