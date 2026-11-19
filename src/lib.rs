@@ -302,7 +302,7 @@ pub unsafe extern "C" fn gbm_bo_import(
             // A legacy FD import may infer the real NVIDIA layout (e.g. a
             // tiled modifier) even though the caller supplied modifier=0.
             // Never return such a BO to a caller that requested Linear.
-            let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+            let destroy_symbol = unsafe { next(b"gbm_bo_destroy\0") };
             if !destroy_symbol.is_null() {
                 let destroy: unsafe extern "C" fn(*mut GbmBo) =
                     unsafe { std::mem::transmute(destroy_symbol) };
