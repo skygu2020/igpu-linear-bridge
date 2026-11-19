@@ -272,18 +272,18 @@ int main(int argc, char **argv) {
   EGLBoolean choose_ok =
       eglChooseConfig(display, config_attrs_rgba, &config, 1, &config_count);
   fprintf(stderr,
-          "eglChooseConfig(RGBA): result=%s configs=%d error=0x%04x\\n",
+          "eglChooseConfig(RGBA): result=%s configs=%d error=0x%04x\n",
           choose_ok ? "TRUE" : "FALSE", config_count, eglGetError());
   if (!choose_ok || config_count < 1) {
     config_count = 0;
     choose_ok = eglChooseConfig(display, config_attrs_minimal, &config, 1,
                                 &config_count);
     fprintf(stderr,
-            "eglChooseConfig(minimal): result=%s configs=%d error=0x%04x\\n",
+            "eglChooseConfig(minimal): result=%s configs=%d error=0x%04x\n",
             choose_ok ? "TRUE" : "FALSE", config_count, eglGetError());
   }
   if (!choose_ok || config_count < 1) {
-    fprintf(stderr, "No GLES2 pbuffer EGLConfig available\\n");
+    fprintf(stderr, "No GLES2 pbuffer EGLConfig available\n");
     return 9;
   }
 
