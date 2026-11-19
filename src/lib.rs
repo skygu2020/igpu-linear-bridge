@@ -8,6 +8,10 @@ struct GbmDevice { _private: [u8; 0] }
 #[repr(C)]
 struct GbmBo { _private: [u8; 0] }
 
+type CreateBasic = unsafe extern "C" fn(
+    *mut GbmDevice, c_uint, c_uint, c_uint, c_uint
+) -> *mut GbmBo;
+
 type Create = unsafe extern "C" fn(
     *mut GbmDevice, c_uint, c_uint, c_uint, *const u64, c_uint
 ) -> *mut GbmBo;
@@ -19,6 +23,7 @@ type Create2 = unsafe extern "C" fn(
 type GetModifier = unsafe extern "C" fn(*mut GbmBo) -> u64;
 
 const LINEAR: u64 = 0;
+const GBM_BO_USE_LINEAR: c_uint = 1 << 4;
 const RTLD_NEXT: *mut c_void = -1isize as *mut c_void;
 
 #[link(name = "dl")]
@@ -196,5 +201,69 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
 
     log_allocation("create_with_modifiers2", width, height, format, Some(flags),
         modifier_list(modifiers, count), "linear", ptr::null_mut());
+    ptr::null_mut()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gbm_bo_create(
+    device: *mut GbmDevice,
+    width: c_uint,
+    height: c_uint,
+    format: c_uint,
+    flags: c_uint,
+) -> *mut GbmBo {
+    let symbol = unsafe { next(b"gbm_bo_create\\0") };
+    if symbol.is_null() {
+        log("ERROR: real gbm_bo_create symbol not found");
+        return ptr::null_mut();
+    }
+    let real: CreateBasic = unsafe { std::mem::transmute(symbol) };
+    let selected = mode();
+    if selected == Mode::Off {
+        return unsafe { real(device, width, height, format, flags) };
+    }
+
+    // Preserve all caller requirements and additionally request a linear BO.
+    let linear_flags = flags | GBM_BO_USE_LINEAR;
+    let bo = unsafe { real(device, width, height, format, linear_flags) };
+    if !bo.is_null() {
+        log_allocation(
+            "create",
+            width,
+            height,
+            format,
+            Some(linear_flags),
+            format!("original_flags=0x{flags:08x}"),
+            "linear-flag",
+            bo,
+        );
+        return bo;
+    }
+
+    if selected == Mode::Prefer {
+        let fallback = unsafe { real(device, width, height, format, flags) };
+        log_allocation(
+            "create",
+            width,
+            height,
+            format,
+            Some(flags),
+            format!("original_flags=0x{flags:08x}"),
+            "original-flags-fallback",
+            fallback,
+        );
+        return fallback;
+    }
+
+    log_allocation(
+        "create",
+        width,
+        height,
+        format,
+        Some(linear_flags),
+        format!("original_flags=0x{flags:08x}"),
+        "linear-flag",
+        ptr::null_mut(),
+    );
     ptr::null_mut()
 }
