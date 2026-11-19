@@ -461,7 +461,7 @@ pub unsafe extern "C" fn gbm_bo_import(
             } else {
                 eprintln!(
                     "[igpu-linear-bridge] probe_import_retry {}x{} original_flags=0x{flags:08x} retry_flags=0x{retry_flags:08x} errno={} FAILED",
-                    data.width, data.height, retry_flags, unsafe { *__errno_location() }
+                    data.width, data.height, unsafe { *__errno_location() }
                 );
             }
             // Retain the duplicated FD; ownership semantics vary by GBM backend.
