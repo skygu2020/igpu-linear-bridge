@@ -287,11 +287,30 @@ pub unsafe extern "C" fn gbm_bo_import(
         };
         let legacy_errno = unsafe { *__errno_location() };
         if !legacy_bo.is_null() {
-            LEGACY_IMPORT_FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed);
             let imported_modifier = unsafe { actual_modifier(legacy_bo) };
+            if imported_modifier == Some(LINEAR) {
+                LEGACY_IMPORT_FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+                if fallback_call <= 32 {
+                    eprintln!(
+                        "[igpu-linear-bridge] linear_import_fallback #{fallback_call} {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} legacy_modifier=0x0000000000000000 OK",
+                        data.width, data.height, data.format, data.strides[0]
+                    );
+                }
+                return legacy_bo;
+            }
+
+            // A legacy FD import may infer the real NVIDIA layout (e.g. a
+            // tiled modifier) even though the caller supplied modifier=0.
+            // Never return such a BO to a caller that requested Linear.
+            let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+            if !destroy_symbol.is_null() {
+                let destroy: unsafe extern "C" fn(*mut GbmBo) =
+                    unsafe { std::mem::transmute(destroy_symbol) };
+                unsafe { destroy(legacy_bo) };
+            }
             if fallback_call <= 32 {
                 eprintln!(
-                    "[igpu-linear-bridge] linear_import_fallback #{fallback_call} {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} legacy_modifier={} OK",
+                    "[igpu-linear-bridge] linear_import_fallback #{fallback_call} {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} legacy_modifier={} REJECTED",
                     data.width,
                     data.height,
                     data.format,
@@ -299,7 +318,6 @@ pub unsafe extern "C" fn gbm_bo_import(
                     imported_modifier.map(|v| format!("0x{v:016x}")).unwrap_or_else(|| "<unavailable>".to_string())
                 );
             }
-            return legacy_bo;
         }
         if fallback_call <= 32 {
             eprintln!(
