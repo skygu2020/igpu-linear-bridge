@@ -313,7 +313,7 @@ int main(int argc, char **argv) {
       (const char *)glGetString(GL_EXTENSIONS);
   const int has_external_image =
       has_extension(gl_ext, "GL_OES_EGL_image_external");
-  fprintf(stderr, "GL_OES_EGL_image_external: %s\\n",
+  fprintf(stderr, "GL_OES_EGL_image_external: %s\n",
           has_external_image ? "yes" : "no");
   if (has_external_image) {
     EGLImageKHR external_image =
@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
       image_target(GL_TEXTURE_EXTERNAL_OES, external_image);
       GLenum external_error = glGetError();
       fprintf(stderr,
-              "glEGLImageTargetTexture2DOES(EXTERNAL_OES): glGetError=0x%04x\\n",
+              "glEGLImageTargetTexture2DOES(EXTERNAL_OES): glGetError=0x%04x\n",
               external_error);
       glDeleteTextures(1, &external_texture);
       destroy_image(display, external_image);
