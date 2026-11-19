@@ -401,6 +401,78 @@ pub unsafe extern "C" fn gbm_bo_import(
         }
     }
 
+    // Chromium's 1x1 modifier capability probe imports a test BO with
+    // SCANOUT | RENDERING (0x5). Some GBM backends accept the same Linear
+    // dma-buf with SCANOUT alone (0x1), but reject the combined usage.
+    // Keep this opt-in and probe-only: never weaken usage on real-size BOs.
+    if bo.is_null()
+        && data.width == 1
+        && data.height == 1
+        && data.num_fds == 1
+        && data.modifier == LINEAR
+        && data.offsets[0] == 0
+        && flags & (1 << 2) != 0
+        && env::var("IGPU_LINEAR_BRIDGE_RETRY_PROBE_WITHOUT_RENDERING").as_deref() == Ok("1")
+    {
+        let retry_flags = flags & !(1 << 2);
+        let retry_fd = unsafe { dup(data.fds[0]) };
+        if retry_fd >= 0 {
+            let mut retry = GbmImportFdModifierData {
+                width: data.width,
+                height: data.height,
+                format: data.format,
+                num_fds: 1,
+                fds: [retry_fd, -1, -1, -1],
+                strides: [data.strides[0], 0, 0, 0],
+                offsets: [data.offsets[0], 0, 0, 0],
+                modifier: data.modifier,
+            };
+            let retry_bo = unsafe {
+                real(
+                    device,
+                    GBM_BO_IMPORT_FD_MODIFIER,
+                    (&mut retry as *mut GbmImportFdModifierData).cast(),
+                    retry_flags,
+                )
+            };
+            if !retry_bo.is_null() {
+                let retry_modifier = unsafe { actual_modifier(retry_bo) };
+                if retry_modifier == Some(LINEAR) {
+                    eprintln!(
+                        "[igpu-linear-bridge] probe_import_retry {}x{} format=0x{:08x} original_flags=0x{flags:08x} retry_flags=0x{retry_flags:08x} modifier=0x0000000000000000 OK",
+                        data.width, data.height, data.format
+                    );
+                    return retry_bo;
+                }
+                let destroy_symbol = unsafe { next(b"gbm_bo_destroy\0") };
+                if !destroy_symbol.is_null() {
+                    let destroy: unsafe extern "C" fn(*mut GbmBo) =
+                        unsafe { std::mem::transmute(destroy_symbol) };
+                    unsafe { destroy(retry_bo) };
+                }
+                eprintln!(
+                    "[igpu-linear-bridge] probe_import_retry {}x{} original_flags=0x{flags:08x} retry_flags=0x{retry_flags:08x} modifier={} REJECTED",
+                    data.width,
+                    data.height,
+                    retry_modifier
+                        .map(|v| format!("0x{v:016x}"))
+                        .unwrap_or_else(|| "<unavailable>".to_string())
+                );
+            } else {
+                eprintln!(
+                    "[igpu-linear-bridge] probe_import_retry {}x{} original_flags=0x{flags:08x} retry_flags=0x{retry_flags:08x} errno={} FAILED",
+                    data.width, data.height, retry_flags, unsafe { *__errno_location() }
+                );
+            }
+            // Retain the duplicated FD; ownership semantics vary by GBM backend.
+        } else {
+            eprintln!(
+                "[igpu-linear-bridge] probe_import_retry dup failed errno={}",
+                unsafe { *__errno_location() }
+            );
+        }
+    }
+
     if bo.is_null()
         && data.num_fds == 1
         && data.modifier == LINEAR
