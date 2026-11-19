@@ -126,6 +126,8 @@ const GBM_BO_IMPORT_FD: c_uint = 0x5503;
 const GBM_BO_IMPORT_FD_MODIFIER: c_uint = 0x5504;
 static LEGACY_IMPORT_DIAG_RAN: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+static MODIFIER_IMPORT_FLAGS_DIAG_RAN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 const LINEAR: u64 = 0;
 const GBM_BO_USE_LINEAR: c_uint = 1 << 4;
@@ -324,6 +326,81 @@ pub unsafe extern "C" fn gbm_bo_import(
             data.modifier
         );
     }
+    if bo.is_null()
+        && data.width == 1
+        && data.height == 1
+        && data.num_fds == 1
+        && data.modifier == LINEAR
+        && env::var("IGPU_LINEAR_BRIDGE_DIAG_MODIFIER_FLAGS").as_deref() == Ok("1")
+        && !MODIFIER_IMPORT_FLAGS_DIAG_RAN.swap(true, Ordering::Relaxed)
+    {
+        // Diagnostic only: retry the same modifier import with duplicated FDs
+        // and reduced usage flags. The original Chromium import result and
+        // buffer are left untouched.
+        for probe_flags in [0, 1, 4] {
+            let probe_fd = unsafe { dup(data.fds[0]) };
+            if probe_fd < 0 {
+                eprintln!(
+                    "[igpu-linear-bridge] modifier_flags_diag dup failed errno={}",
+                    unsafe { *__errno_location() }
+                );
+                break;
+            }
+            let mut probe = GbmImportFdModifierData {
+                width: data.width,
+                height: data.height,
+                format: data.format,
+                num_fds: 1,
+                fds: [probe_fd, -1, -1, -1],
+                strides: [data.strides[0], 0, 0, 0],
+                offsets: [data.offsets[0], 0, 0, 0],
+                modifier: data.modifier,
+            };
+            let probe_bo = unsafe {
+                real(
+                    device,
+                    GBM_BO_IMPORT_FD_MODIFIER,
+                    (&mut probe as *mut GbmImportFdModifierData).cast(),
+                    probe_flags,
+                )
+            };
+            let probe_errno = unsafe { *__errno_location() };
+            if probe_bo.is_null() {
+                eprintln!(
+                    "[igpu-linear-bridge] modifier_flags_diag {}x{} format=0x{:08x} fd={} stride={} offset={} modifier=0x{:016x} flags=0x{probe_flags:08x} errno={} FAILED",
+                    data.width,
+                    data.height,
+                    data.format,
+                    probe_fd,
+                    data.strides[0],
+                    data.offsets[0],
+                    data.modifier,
+                    probe_errno
+                );
+            } else {
+                let imported_modifier = unsafe { actual_modifier(probe_bo) };
+                eprintln!(
+                    "[igpu-linear-bridge] modifier_flags_diag {}x{} format=0x{:08x} fd={} modifier={} flags=0x{probe_flags:08x} OK",
+                    data.width,
+                    data.height,
+                    data.format,
+                    probe_fd,
+                    imported_modifier
+                        .map(|v| format!("0x{v:016x}"))
+                        .unwrap_or_else(|| "<unavailable>".to_string())
+                );
+                let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+                if !destroy_symbol.is_null() {
+                    let destroy: unsafe extern "C" fn(*mut GbmBo) =
+                        unsafe { std::mem::transmute(destroy_symbol) };
+                    unsafe { destroy(probe_bo) };
+                }
+            }
+            // Keep the duplicated FD open, matching the existing legacy
+            // import diagnostic's conservative ownership handling.
+        }
+    }
+
     if bo.is_null()
         && data.num_fds == 1
         && data.modifier == LINEAR
