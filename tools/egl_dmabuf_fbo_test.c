@@ -306,6 +306,39 @@ int main(int argc, char **argv) {
   fprintf(stderr, "glEGLImageTargetTexture2DOES: glGetError=0x%04x\n",
           gl_error);
 
+  // External-only modifiers must be sampled through
+  // GL_TEXTURE_EXTERNAL_OES, not GL_TEXTURE_2D. Use a separate EGLImage
+  // sibling so the test does not depend on cross-target rebinding rules.
+  const char *gl_ext =
+      (const char *)glGetString(GL_EXTENSIONS);
+  const int has_external_image =
+      has_extension(gl_ext, "GL_OES_EGL_image_external");
+  fprintf(stderr, "GL_OES_EGL_image_external: %s\\n",
+          has_external_image ? "yes" : "no");
+  if (has_external_image) {
+    EGLImageKHR external_image =
+        create_image(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT,
+                     NULL, image_attrs);
+    if (external_image != EGL_NO_IMAGE_KHR) {
+      GLuint external_texture = 0;
+      glGenTextures(1, &external_texture);
+      glBindTexture(GL_TEXTURE_EXTERNAL_OES, external_texture);
+      glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER,
+                      GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER,
+                      GL_NEAREST);
+      image_target(GL_TEXTURE_EXTERNAL_OES, external_image);
+      GLenum external_error = glGetError();
+      fprintf(stderr,
+              "glEGLImageTargetTexture2DOES(EXTERNAL_OES): glGetError=0x%04x\\n",
+              external_error);
+      glDeleteTextures(1, &external_texture);
+      destroy_image(display, external_image);
+    } else {
+      print_egl_error("eglCreateImageKHR(EXTERNAL_OES test)");
+    }
+  }
+
   glGenFramebuffers(1, &fbo);
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
