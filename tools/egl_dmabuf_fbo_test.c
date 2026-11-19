@@ -207,7 +207,11 @@ int main(int argc, char **argv) {
     return 13;
   }
 
-  fprintf(stderr, "GL vendor: %s\\n", glGetString(GL_VENDOR));\n  fprintf(stderr, "GL renderer: %s\\n", glGetString(GL_RENDERER));\n  fprintf(stderr, "GL version: %s\\n", glGetString(GL_VERSION));\n\n  const EGLint image_attrs[] = {
+  fprintf(stderr, "GL vendor: %s\\n", glGetString(GL_VENDOR));
+  fprintf(stderr, "GL renderer: %s\\n", glGetString(GL_RENDERER));
+  fprintf(stderr, "GL version: %s\\n", glGetString(GL_VERSION));
+
+  const EGLint image_attrs[] = {
       EGL_WIDTH, width,
       EGL_HEIGHT, height,
       EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ABGR8888,
@@ -246,7 +250,9 @@ int main(int argc, char **argv) {
           status, gl_error,
           status == GL_FRAMEBUFFER_COMPLETE ? "COMPLETE" : "INCOMPLETE");
 
-  const GLenum dmabuf_fbo_status = status;\n\n  // Control: a regular driver-allocated texture should be framebuffer-renderable.
+  const GLenum dmabuf_fbo_status = status;
+
+  // Control: a regular driver-allocated texture should be framebuffer-renderable.
   GLuint control_texture = 0, control_fbo = 0;
   glGenTextures(1, &control_texture);
   glBindTexture(GL_TEXTURE_2D, control_texture);
