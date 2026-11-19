@@ -300,7 +300,7 @@ pub unsafe extern "C" fn gbm_bo_import(
                 if legacy_bo.is_null() { "FAILED" } else { "OK" }
             );
             if !legacy_bo.is_null() {
-                let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+                let destroy_symbol = unsafe { next(b"gbm_bo_destroy\0") };
                 if !destroy_symbol.is_null() {
                     let destroy: unsafe extern "C" fn(*mut GbmBo) =
                         unsafe { std::mem::transmute(destroy_symbol) };
