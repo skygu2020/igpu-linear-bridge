@@ -13,6 +13,7 @@ static LINEAR_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 static LINEAR_FAILURES: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+static IMPORT_CALLS: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_CALLS: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_FAILURES: AtomicU64 = AtomicU64::new(0);
@@ -238,6 +239,17 @@ pub unsafe extern "C" fn gbm_bo_import(
         return ptr::null_mut();
     }
     let real: Import = unsafe { std::mem::transmute(symbol) };
+
+    // Record the numeric import type before interpreting the payload. GBM
+    // headers in the wild have used both 0x5504 and 0x5505 for modifier
+    // imports; 0x5504 is also used by older headers for FD_PLANAR.
+    let import_call = IMPORT_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+    if import_call <= 64 && log_enabled() {
+        eprintln!(
+            "[igpu-linear-bridge] gbm_bo_import call #{import_call} type=0x{import_type:04x} flags=0x{flags:08x} buffer_null={}",
+            buffer.is_null()
+        );
+    }
 
     if import_type != GBM_BO_IMPORT_FD_MODIFIER || buffer.is_null() {
         return unsafe { real(device, import_type, buffer, flags) };
