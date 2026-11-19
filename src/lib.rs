@@ -16,6 +16,8 @@ static FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_CALLS: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_FAILURES: AtomicU64 = AtomicU64::new(0);
+static LEGACY_IMPORT_FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
+static LEGACY_IMPORT_FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
@@ -64,6 +66,11 @@ extern "C" fn report_stats() {
         IMPORT_MODIFIER_CALLS.load(Ordering::Relaxed),
         IMPORT_MODIFIER_SUCCESSES.load(Ordering::Relaxed),
         IMPORT_MODIFIER_FAILURES.load(Ordering::Relaxed),
+    );
+    eprintln!(
+        "[igpu-linear-bridge] legacy import fallback: calls={} success={}",
+        LEGACY_IMPORT_FALLBACK_CALLS.load(Ordering::Relaxed),
+        LEGACY_IMPORT_FALLBACK_SUCCESSES.load(Ordering::Relaxed),
     );
 }
 
@@ -259,6 +266,42 @@ pub unsafe extern "C" fn gbm_bo_import(
             if data.num_fds > 0 && data.num_fds <= 4 { data.strides[0] } else { -1 },
             if data.num_fds > 0 && data.num_fds <= 4 { data.offsets[0] } else { -1 },
             data.modifier
+        );
+    }
+    if bo.is_null()
+        && data.num_fds == 1
+        && data.modifier == LINEAR
+        && data.offsets[0] == 0
+        && env::var("IGPU_LINEAR_BRIDGE_LINEAR_IMPORT_FALLBACK").as_deref() == Ok("1")
+    {
+        LEGACY_IMPORT_FALLBACK_CALLS.fetch_add(1, Ordering::Relaxed);
+        let mut legacy = GbmImportFdData {
+            fd: data.fds[0],
+            width: data.width,
+            height: data.height,
+            stride: data.strides[0] as c_uint,
+            format: data.format,
+        };
+        let legacy_bo = unsafe {
+            real(device, GBM_BO_IMPORT_FD, (&mut legacy as *mut GbmImportFdData).cast(), flags)
+        };
+        let legacy_errno = unsafe { *__errno_location() };
+        if !legacy_bo.is_null() {
+            LEGACY_IMPORT_FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+            let imported_modifier = unsafe { actual_modifier(legacy_bo) };
+            eprintln!(
+                "[igpu-linear-bridge] linear_import_fallback {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} legacy_modifier={} OK",
+                data.width,
+                data.height,
+                data.format,
+                data.strides[0],
+                imported_modifier.map(|v| format!("0x{v:016x}")).unwrap_or_else(|| "<unavailable>".to_string())
+            );
+            return legacy_bo;
+        }
+        eprintln!(
+            "[igpu-linear-bridge] linear_import_fallback {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} errno={} FAILED",
+            data.width, data.height, data.format, data.strides[0], legacy_errno
         );
     }
     if bo.is_null()
