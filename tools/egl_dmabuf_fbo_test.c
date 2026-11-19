@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
     close(drm_fd);
     return 1;
   }
-  fprintf(stderr, "GBM device opened: format=AB24 size=%dx%d modifier=LINEAR\\n",
+  fprintf(stderr, "GBM device opened: format=AB24 size=%dx%d modifier=LINEAR\n",
           width, height);
 
   const uint64_t linear = DRM_FORMAT_MOD_LINEAR;
