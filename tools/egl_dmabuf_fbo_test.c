@@ -255,16 +255,35 @@ int main(int argc, char **argv) {
     return 8;
   }
 
-  const EGLint config_attrs[] = {
+  // Some EGL implementations expose GLES2 pbuffer configs without an
+  // 8-bit alpha channel. Try the fully specified RGBA config first, then
+  // fall back to the minimum requirements needed by this diagnostic.
+  const EGLint config_attrs_rgba[] = {
       EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
       EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8,
       EGL_NONE};
-  EGLConfig config;
+  const EGLint config_attrs_minimal[] = {
+      EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
+      EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+      EGL_NONE};
+  EGLConfig config = NULL;
   EGLint config_count = 0;
-  if (!eglChooseConfig(display, config_attrs, &config, 1, &config_count) ||
-      config_count < 1) {
-    print_egl_error("eglChooseConfig");
+  EGLBoolean choose_ok =
+      eglChooseConfig(display, config_attrs_rgba, &config, 1, &config_count);
+  fprintf(stderr,
+          "eglChooseConfig(RGBA): result=%s configs=%d error=0x%04x\\n",
+          choose_ok ? "TRUE" : "FALSE", config_count, eglGetError());
+  if (!choose_ok || config_count < 1) {
+    config_count = 0;
+    choose_ok = eglChooseConfig(display, config_attrs_minimal, &config, 1,
+                                &config_count);
+    fprintf(stderr,
+            "eglChooseConfig(minimal): result=%s configs=%d error=0x%04x\\n",
+            choose_ok ? "TRUE" : "FALSE", config_count, eglGetError());
+  }
+  if (!choose_ok || config_count < 1) {
+    fprintf(stderr, "No GLES2 pbuffer EGLConfig available\\n");
     return 9;
   }
 
