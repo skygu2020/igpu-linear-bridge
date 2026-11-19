@@ -432,23 +432,27 @@ int main(int argc, char **argv) {
     GLenum clear_error = glGetError();
     fprintf(stderr, "DMA-BUF write test: after clear glGetError=0x%04x\n",
             clear_error);
-    fprintf(stderr, "DMA-BUF write test: before glReadPixels\n");
-    glReadPixels(width / 2, height / 2, 1, 1, GL_RGBA,
-                 GL_UNSIGNED_BYTE, actual);
-    fprintf(stderr, "DMA-BUF write test: after glReadPixels\n");
-    GLenum read_error = glGetError();
+    // Do not call glReadPixels here: the current Intel driver aborts while
+    // reading from this cross-GPU imported NVIDIA allocation. First isolate
+    // whether command submission/completion itself works.
+    fprintf(stderr, "DMA-BUF write test: before glFlush\\n");
+    glFlush();
+    GLenum flush_error = glGetError();
+    fprintf(stderr, "DMA-BUF write test: after glFlush error=0x%04x\\n",
+            flush_error);
+    fprintf(stderr, "DMA-BUF write test: before glFinish\\n");
+    glFinish();
+    GLenum finish_error = glGetError();
+    fprintf(stderr, "DMA-BUF write test: after glFinish error=0x%04x\\n",
+            finish_error);
     dmabuf_write_ok = clear_error == GL_NO_ERROR &&
-                      read_error == GL_NO_ERROR &&
-                      actual[0] == expected[0] &&
-                      actual[1] == expected[1] &&
-                      actual[2] == expected[2] &&
-                      actual[3] == expected[3];
+                      flush_error == GL_NO_ERROR &&
+                      finish_error == GL_NO_ERROR;
     fprintf(stderr,
-            "DMA-BUF FBO clear/readback: clear_error=0x%04x read_error=0x%04x "
-            "pixel=(%u,%u,%u,%u) expected=(%u,%u,%u,%u) %s\n",
-            clear_error, read_error, actual[0], actual[1], actual[2], actual[3],
-            expected[0], expected[1], expected[2], expected[3],
-            dmabuf_write_ok ? "PASS" : "FAIL");
+            "DMA-BUF FBO clear/finish: clear_error=0x%04x flush_error=0x%04x "
+            "finish_error=0x%04x %s\\n",
+            clear_error, flush_error, finish_error,
+            dmabuf_write_ok ? "SUBMITTED" : "FAILED");
   } else {
     fprintf(stderr, "DMA-BUF FBO clear/readback: SKIP (FBO not complete)\n");
   }
