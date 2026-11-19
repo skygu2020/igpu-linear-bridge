@@ -76,8 +76,8 @@ int main(int argc, char **argv) {
     close(drm_fd);
     return 1;
   }
-  fprintf(stderr, "GBM device: %s, format=AB24 size=%dx%d modifier=LINEAR\n",
-          gbm_device_get_backend_name(gbm), width, height);
+  fprintf(stderr, "GBM device opened: format=AB24 size=%dx%d modifier=LINEAR\\n",
+          width, height);
 
   const uint64_t linear = DRM_FORMAT_MOD_LINEAR;
   struct gbm_bo *bo =
