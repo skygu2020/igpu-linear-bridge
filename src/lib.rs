@@ -185,12 +185,7 @@ unsafe fn actual_modifier(bo: *mut GbmBo) -> Option<u64> {
     let get: GetModifier = unsafe { std::mem::transmute(symbol) };
     Some(unsafe { get(bo) })
 }
-unsafe fn actual_modifier(bo: *mut GbmBo) -> Option<u64> {
-    let symbol = unsafe { next(b"gbm_bo_get_modifier\0") };
-    if symbol.is_null() { return None; }
-    let get: GetModifier = unsafe { std::mem::transmute(symbol) };
-    Some(unsafe { get(bo) })
-}
+
 
 
 type GetFdForPlane = unsafe extern "C" fn(*mut GbmBo, c_int) -> c_int;
