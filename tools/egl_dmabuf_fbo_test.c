@@ -412,6 +412,39 @@ int main(int argc, char **argv) {
 
   const GLenum dmabuf_fbo_status = status;
 
+  // FBO completeness proves attachment compatibility, but not that the
+  // importer can actually write the shared allocation. Clear a known color
+  // and read it back through GLES to verify the render path end-to-end.
+  int dmabuf_write_ok = 0;
+  if (dmabuf_fbo_status == GL_FRAMEBUFFER_COMPLETE && gl_error == GL_NO_ERROR) {
+    const GLubyte expected[4] = {64, 128, 191, 255};
+    GLubyte actual[4] = {0, 0, 0, 0};
+    glViewport(0, 0, width, height);
+    glDisable(GL_SCISSOR_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glClearColor(64.0f / 255.0f, 128.0f / 255.0f,
+                 191.0f / 255.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    GLenum clear_error = glGetError();
+    glReadPixels(width / 2, height / 2, 1, 1, GL_RGBA,
+                 GL_UNSIGNED_BYTE, actual);
+    GLenum read_error = glGetError();
+    dmabuf_write_ok = clear_error == GL_NO_ERROR &&
+                      read_error == GL_NO_ERROR &&
+                      actual[0] == expected[0] &&
+                      actual[1] == expected[1] &&
+                      actual[2] == expected[2] &&
+                      actual[3] == expected[3];
+    fprintf(stderr,
+            "DMA-BUF FBO clear/readback: clear_error=0x%04x read_error=0x%04x "
+            "pixel=(%u,%u,%u,%u) expected=(%u,%u,%u,%u) %s\\n",
+            clear_error, read_error, actual[0], actual[1], actual[2], actual[3],
+            expected[0], expected[1], expected[2], expected[3],
+            dmabuf_write_ok ? "PASS" : "FAIL");
+  } else {
+    fprintf(stderr, "DMA-BUF FBO clear/readback: SKIP (FBO not complete)\\n");
+  }
+
   // Control: a regular driver-allocated texture should be framebuffer-renderable.
   GLuint control_texture = 0, control_fbo = 0;
   glGenTextures(1, &control_texture);
@@ -446,5 +479,5 @@ int main(int argc, char **argv) {
   }
   gbm_device_destroy(gbm);
   close(drm_fd);
-  return dmabuf_fbo_status == GL_FRAMEBUFFER_COMPLETE ? 0 : 15;
+  return dmabuf_fbo_status == GL_FRAMEBUFFER_COMPLETE && dmabuf_write_ok ? 0 : 15;
 }
