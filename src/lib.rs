@@ -45,6 +45,20 @@ fn log_enabled() -> bool {
         .unwrap_or(true)
 }
 
+// By default suppress tiny GBM capability probes (commonly 1x1).
+// Set IGPU_LINEAR_BRIDGE_MIN_SIZE=1 to include them.
+fn min_log_size() -> u32 {
+    env::var("IGPU_LINEAR_BRIDGE_MIN_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(2)
+}
+
+fn should_log(width: c_uint, height: c_uint) -> bool {
+    log_enabled() && width >= min_log_size() && height >= min_log_size()
+}
+
 fn log(message: &str) {
     if log_enabled() {
         eprintln!("[igpu-linear-bridge] {message}");
@@ -56,7 +70,7 @@ unsafe fn next(name: &'static [u8]) -> *mut c_void {
 }
 
 unsafe fn actual_modifier(bo: *mut GbmBo) -> Option<u64> {
-    let symbol = unsafe { next(b"gbm_bo_get_modifier\0") };
+    let symbol = unsafe { next(b"gbm_bo_get_modifier\\0") };
     if symbol.is_null() { return None; }
     let get: GetModifier = unsafe { std::mem::transmute(symbol) };
     Some(unsafe { get(bo) })
@@ -76,17 +90,32 @@ fn modifier_list(ptr: *const u64, count: c_uint) -> String {
     format!("count={count}, list=[{list}]")
 }
 
-fn log_result(label: &str, bo: *mut GbmBo) {
-    if bo.is_null() {
-        log(&format!("{label}: allocation failed"));
+fn log_allocation(
+    api: &str,
+    width: c_uint,
+    height: c_uint,
+    format: c_uint,
+    flags: Option<c_uint>,
+    requested: String,
+    path: &str,
+    bo: *mut GbmBo,
+) {
+    if !should_log(width, height) { return; }
+
+    let flag_text = flags
+        .map(|v| format!(" flags=0x{v:08x}"))
+        .unwrap_or_default();
+    let outcome = if bo.is_null() {
+        "FAILED".to_string()
     } else {
-        let modifier = unsafe { actual_modifier(bo) };
-        log(&format!(
-            "{label}: allocation succeeded; actual modifier={}",
-            modifier.map(|v| format!("0x{v:016x}"))
-                .unwrap_or_else(|| "<query unavailable>".to_string())
-        ));
-    }
+        match unsafe { actual_modifier(bo) } {
+            Some(value) => format!("OK actual_modifier=0x{value:016x}"),
+            None => "OK actual_modifier=<query unavailable>".to_string(),
+        }
+    };
+    eprintln!(
+        "[igpu-linear-bridge] {api} {width}x{height} format=0x{format:08x}{flag_text} path={path} {outcome}; requested {requested}"
+    );
 }
 
 #[no_mangle]
@@ -98,7 +127,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
     modifiers: *const u64,
     count: c_uint,
 ) -> *mut GbmBo {
-    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers\0") };
+    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers\\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create_with_modifiers symbol not found");
         return ptr::null_mut();
@@ -109,24 +138,23 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
         return unsafe { real(device, width, height, format, modifiers, count) };
     }
 
-    log(&format!(
-        "create_with_modifiers {width}x{height} format=0x{format:08x}; requested {}",
-        modifier_list(modifiers, count)
-    ));
     let linear = [LINEAR];
     let bo = unsafe { real(device, width, height, format, linear.as_ptr(), 1) };
     if !bo.is_null() {
-        log_result("LINEAR", bo);
+        log_allocation("create_with_modifiers", width, height, format, None,
+            modifier_list(modifiers, count), "linear", bo);
         return bo;
     }
-    log("LINEAR allocation failed");
 
     if selected == Mode::Prefer {
-        log("prefer mode: retrying original modifier list");
         let fallback = unsafe { real(device, width, height, format, modifiers, count) };
-        log_result("original-list fallback", fallback);
+        log_allocation("create_with_modifiers", width, height, format, None,
+            modifier_list(modifiers, count), "original-list-fallback", fallback);
         return fallback;
     }
+
+    log_allocation("create_with_modifiers", width, height, format, None,
+        modifier_list(modifiers, count), "linear", ptr::null_mut());
     ptr::null_mut()
 }
 
@@ -140,7 +168,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
     count: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
-    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers2\0") };
+    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers2\\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create_with_modifiers2 symbol not found");
         return ptr::null_mut();
@@ -151,23 +179,22 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
         return unsafe { real(device, width, height, format, modifiers, count, flags) };
     }
 
-    log(&format!(
-        "create_with_modifiers2 {width}x{height} format=0x{format:08x} flags=0x{flags:08x}; requested {}",
-        modifier_list(modifiers, count)
-    ));
     let linear = [LINEAR];
     let bo = unsafe { real(device, width, height, format, linear.as_ptr(), 1, flags) };
     if !bo.is_null() {
-        log_result("LINEAR2", bo);
+        log_allocation("create_with_modifiers2", width, height, format, Some(flags),
+            modifier_list(modifiers, count), "linear", bo);
         return bo;
     }
-    log("LINEAR allocation2 failed");
 
     if selected == Mode::Prefer {
-        log("prefer mode: retrying original modifier list");
         let fallback = unsafe { real(device, width, height, format, modifiers, count, flags) };
-        log_result("original-list fallback2", fallback);
+        log_allocation("create_with_modifiers2", width, height, format, Some(flags),
+            modifier_list(modifiers, count), "original-list-fallback", fallback);
         return fallback;
     }
+
+    log_allocation("create_with_modifiers2", width, height, format, Some(flags),
+        modifier_list(modifiers, count), "linear", ptr::null_mut());
     ptr::null_mut()
 }
