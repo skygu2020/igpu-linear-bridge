@@ -437,12 +437,12 @@ int main(int argc, char **argv) {
                       actual[3] == expected[3];
     fprintf(stderr,
             "DMA-BUF FBO clear/readback: clear_error=0x%04x read_error=0x%04x "
-            "pixel=(%u,%u,%u,%u) expected=(%u,%u,%u,%u) %s\\n",
+            "pixel=(%u,%u,%u,%u) expected=(%u,%u,%u,%u) %s\n",
             clear_error, read_error, actual[0], actual[1], actual[2], actual[3],
             expected[0], expected[1], expected[2], expected[3],
             dmabuf_write_ok ? "PASS" : "FAIL");
   } else {
-    fprintf(stderr, "DMA-BUF FBO clear/readback: SKIP (FBO not complete)\\n");
+    fprintf(stderr, "DMA-BUF FBO clear/readback: SKIP (FBO not complete)\n");
   }
 
   // Control: a regular driver-allocated texture should be framebuffer-renderable.
