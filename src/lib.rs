@@ -671,32 +671,35 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
         {
             let diag_call = RENDERING_DIAG_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
             if diag_call <= 8 {
-                let diag_flags = flags | (1 << 2);
-                let diag_bo = unsafe {
-                    real(device, width, height, format, linear.as_ptr(), 1, diag_flags)
-                };
-                let diag_errno = unsafe { *__errno_location() };
-                if diag_bo.is_null() {
-                    eprintln!(
-                        "[igpu-linear-bridge] create_rendering_diag #{diag_call} {width}x{height} format=0x{format:08x} original_flags=0x{flags:08x} diag_flags=0x{diag_flags:08x} errno={diag_errno} FAILED"
-                    );
-                } else {
-                    let diag_modifier = unsafe { actual_modifier(diag_bo) };
-                    eprintln!(
-                        "[igpu-linear-bridge] create_rendering_diag #{diag_call} {width}x{height} format=0x{format:08x} original_flags=0x{flags:08x} diag_flags=0x{diag_flags:08x} modifier={} OK",
-                        diag_modifier
-                            .map(|v| format!("0x{v:016x}"))
-                            .unwrap_or_else(|| "<unavailable>".to_string())
-                    );
-                    let destroy_symbol = unsafe { next(b"gbm_bo_destroy\0") };
-                    if !destroy_symbol.is_null() {
-                        let destroy: unsafe extern "C" fn(*mut GbmBo) =
-                            unsafe { std::mem::transmute(destroy_symbol) };
-                        unsafe { destroy(diag_bo) };
-                    } else {
+                // Compare RENDERING-only (0x4) with SCANOUT|RENDERING
+                // (normally 0x5) to isolate unsupported usage combinations.
+                for diag_flags in [1 << 2, flags | (1 << 2)] {
+                    let diag_bo = unsafe {
+                        real(device, width, height, format, linear.as_ptr(), 1, diag_flags)
+                    };
+                    let diag_errno = unsafe { *__errno_location() };
+                    if diag_bo.is_null() {
                         eprintln!(
-                            "[igpu-linear-bridge] create_rendering_diag #{diag_call} WARNING: gbm_bo_destroy symbol unavailable; diagnostic BO leaked"
+                            "[igpu-linear-bridge] create_rendering_diag #{diag_call} {width}x{height} format=0x{format:08x} original_flags=0x{flags:08x} diag_flags=0x{diag_flags:08x} errno={diag_errno} FAILED"
                         );
+                    } else {
+                        let diag_modifier = unsafe { actual_modifier(diag_bo) };
+                        eprintln!(
+                            "[igpu-linear-bridge] create_rendering_diag #{diag_call} {width}x{height} format=0x{format:08x} original_flags=0x{flags:08x} diag_flags=0x{diag_flags:08x} modifier={} OK",
+                            diag_modifier
+                                .map(|v| format!("0x{v:016x}"))
+                                .unwrap_or_else(|| "<unavailable>".to_string())
+                        );
+                        let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+                        if !destroy_symbol.is_null() {
+                            let destroy: unsafe extern "C" fn(*mut GbmBo) =
+                                unsafe { std::mem::transmute(destroy_symbol) };
+                            unsafe { destroy(diag_bo) };
+                        } else {
+                            eprintln!(
+                                "[igpu-linear-bridge] create_rendering_diag #{diag_call} WARNING: gbm_bo_destroy symbol unavailable; diagnostic BO leaked"
+                            );
+                        }
                     }
                 }
             }
