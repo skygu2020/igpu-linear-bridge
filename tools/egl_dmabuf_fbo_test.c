@@ -255,9 +255,19 @@ int main(int argc, char **argv) {
     return 8;
   }
 
-  // Some EGL implementations expose GLES2 pbuffer configs without an
-  // 8-bit alpha channel. Try the fully specified RGBA config first, then
-  // fall back to the minimum requirements needed by this diagnostic.
+  // Render-node EGL displays may expose no EGLConfig at all. In that
+  // case use EGL_KHR_no_config_context + EGL_KHR_surfaceless_context:
+  // a GLES context without a config and without a pbuffer surface.
+  const char *display_ext = eglQueryString(display, EGL_EXTENSIONS);
+  const int has_no_config =
+      has_extension(display_ext, "EGL_KHR_no_config_context");
+  const int has_surfaceless =
+      has_extension(display_ext, "EGL_KHR_surfaceless_context");
+  fprintf(stderr, "EGL_KHR_no_config_context: %s\n",
+          has_no_config ? "yes" : "no");
+  fprintf(stderr, "EGL_KHR_surfaceless_context: %s\n",
+          has_surfaceless ? "yes" : "no");
+
   const EGLint config_attrs_rgba[] = {
       EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
       EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
@@ -282,21 +292,27 @@ int main(int argc, char **argv) {
             "eglChooseConfig(minimal): result=%s configs=%d error=0x%04x\n",
             choose_ok ? "TRUE" : "FALSE", config_count, eglGetError());
   }
-  if (!choose_ok || config_count < 1) {
-    fprintf(stderr, "No GLES2 pbuffer EGLConfig available\n");
-    return 9;
-  }
-
-  const EGLint pbuffer_attrs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
-  EGLSurface surface = eglCreatePbufferSurface(display, config, pbuffer_attrs);
-  if (surface == EGL_NO_SURFACE) {
-    print_egl_error("eglCreatePbufferSurface");
-    return 10;
-  }
 
   const EGLint context_attrs[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
-  EGLContext context =
-      eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrs);
+  EGLSurface surface = EGL_NO_SURFACE;
+  EGLContext context = EGL_NO_CONTEXT;
+  if (choose_ok && config_count > 0) {
+    const EGLint pbuffer_attrs[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
+    surface = eglCreatePbufferSurface(display, config, pbuffer_attrs);
+    if (surface == EGL_NO_SURFACE) {
+      print_egl_error("eglCreatePbufferSurface");
+      return 10;
+    }
+    context = eglCreateContext(display, config, EGL_NO_CONTEXT, context_attrs);
+  } else if (has_no_config && has_surfaceless) {
+    fprintf(stderr, "Using no-config surfaceless GLES2 context\n");
+    context = eglCreateContext(display, EGL_NO_CONFIG_KHR, EGL_NO_CONTEXT,
+                               context_attrs);
+  } else {
+    fprintf(stderr,
+            "No GLES2 pbuffer EGLConfig and no no-config surfaceless support\n");
+    return 9;
+  }
   if (context == EGL_NO_CONTEXT) {
     print_egl_error("eglCreateContext");
     return 11;
