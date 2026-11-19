@@ -70,7 +70,7 @@ unsafe fn next(name: &'static [u8]) -> *mut c_void {
 }
 
 unsafe fn actual_modifier(bo: *mut GbmBo) -> Option<u64> {
-    let symbol = unsafe { next(b"gbm_bo_get_modifier\\0") };
+    let symbol = unsafe { next(b"gbm_bo_get_modifier\0") };
     if symbol.is_null() { return None; }
     let get: GetModifier = unsafe { std::mem::transmute(symbol) };
     Some(unsafe { get(bo) })
@@ -127,7 +127,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
     modifiers: *const u64,
     count: c_uint,
 ) -> *mut GbmBo {
-    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers\\0") };
+    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create_with_modifiers symbol not found");
         return ptr::null_mut();
@@ -168,7 +168,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
     count: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
-    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers2\\0") };
+    let symbol = unsafe { next(b"gbm_bo_create_with_modifiers2\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create_with_modifiers2 symbol not found");
         return ptr::null_mut();
