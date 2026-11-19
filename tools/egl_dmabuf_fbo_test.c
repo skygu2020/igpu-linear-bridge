@@ -207,9 +207,9 @@ int main(int argc, char **argv) {
     return 13;
   }
 
-  fprintf(stderr, "GL vendor: %s\n", glGetString(GL_VENDOR));
-  fprintf(stderr, "GL renderer: %s\n", glGetString(GL_RENDERER));
-  fprintf(stderr, "GL version: %s\n", glGetString(GL_VERSION));
+  fprintf(stderr, "GL vendor: %s\n", (const char *)glGetString(GL_VENDOR));
+  fprintf(stderr, "GL renderer: %s\n", (const char *)glGetString(GL_RENDERER));
+  fprintf(stderr, "GL version: %s\n", (const char *)glGetString(GL_VERSION));
 
   const EGLint image_attrs[] = {
       EGL_WIDTH, width,
