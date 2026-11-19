@@ -1,86 +1,96 @@
-# igpu-linear-bridge
+# igpu-linear-bridge (Wayland GBM presenter fallback shim)
 
-An experimental Linux LD_PRELOAD shim for GBM modifier-based allocations.
-It is intended for PRIME render-offload systems where an NVIDIA GPU renders
-buffers and an Intel iGPU compositor (such as labwc/wlroots) imports them.
+This replacement is a small C `LD_PRELOAD` shim. It no longer rewrites GBM
+modifier lists and does not import, export, map, clear, blit, or read back any
+DMA-BUF.
 
-## What it does
-
-When enabled, it interposes the following GBM entry points:
-
-- gbm_bo_create_with_modifiers()
-- gbm_bo_create_with_modifiers2()
-
-It replaces the requested modifier list with the single DRM_FORMAT_MOD_LINEAR
-modifier (numeric value 0) at allocation time. The second entry point preserves
-the caller's GBM flags.
-
-It does not rewrite a modifier after allocation, alter DMA-BUF metadata, or
-fake the value returned by gbm_bo_get_modifier(). It currently does not
-interpose implicit-modifier gbm_bo_create(), EGL, Vulkan, or Wayland protocol
-messages.
+Its diagnostic target is Chromium's Wayland GBM-device creation. When explicitly
+enabled, it matches only a Chromium process whose command line contains both
+`--ozone-platform=wayland` and the configured `--render-node-override`, and
+only an FD whose character-device number exactly matches the configured DRM
+node. If the target path cannot be resolved, the shim fails closed and does not
+intercept. In `deny` mode it makes the
+interposed `gbm_create_device(fd)` return `NULL` with `errno=ENODEV`. This is
+intended to make Chromium's Wayland GBM Presenter unavailable so its existing
+EGL Wayland window-surface fallback can be selected.
 
 ## Build
 
-Install Rust and run:
+Requirements: a C compiler, GNU libc development files, and `make`.
 
-    cargo build --release
+```sh
+make
+```
 
-The shared library is:
+Output: `libigpu_linear_bridge.so`.
 
-    target/release/libigpu_linear_bridge.so
+## First run: observe only
 
-No third-party Rust crates are required.
+This confirms whether `gbm_create_device()` is dynamically interposed and
+whether the FD matches the NVIDIA render node. It does not change the GBM call.
 
-## Run
+```sh
+IGPU_GBM_FALLBACK_ENABLE=1 \
+IGPU_GBM_FALLBACK_TARGET=/dev/dri/renderD129 \
+IGPU_GBM_FALLBACK_MODE=observe \
+LD_PRELOAD="$PWD/libigpu_linear_bridge.so" \
+/usr/lib/chromium/chromium \
+  --enable-gpu-rasterization \
+  --ozone-platform=wayland \
+  --render-node-override=/dev/dri/renderD129
+```
 
-    IGPU_LINEAR_BRIDGE_MODE=force \
-    IGPU_LINEAR_BRIDGE_LOG=1 \
-    LD_PRELOAD="$PWD/target/release/libigpu_linear_bridge.so" \
-    /usr/lib/chromium/chromium \
-      --enable-gpu-rasterization \
-      --ozone-platform=wayland \
-      --render-node-override=/dev/dri/renderD129
+Expected diagnostic form:
 
-The NVIDIA render-node override is retained. LD_PRELOAD is inherited by
-Chromium child processes; only processes that call these GBM symbols are
-affected.
+```text
+[igpu-linear-bridge] gbm_create_device #1 fd=... target=/dev/dri/renderD129 caller=... -> passthrough (mode=observe)
+```
 
-## Modes
+If no matching log appears, the hook was not reached, the process command line
+did not match, or the FD did not identify the configured node. Do not switch to
+`deny` until the observe log confirms the intended call.
 
-- Unset or off: pass through without changing allocations.
-- force: request LINEAR only. If that allocation fails, return failure rather
-  than silently returning a tiled buffer.
-- prefer: try LINEAR first, then retry the original modifier list if LINEAR
-  allocation fails. This mode may still return a non-LINEAR allocation.
+## Enable the fallback experiment
 
-Logging is enabled by default when the bridge is active. By default, allocations
-smaller than 2x2 are omitted from the log (they are still intercepted and
-handled normally). Set IGPU_LINEAR_BRIDGE_MIN_SIZE=1 to include 1x1 probes,
-or choose another minimum dimension. Set IGPU_LINEAR_BRIDGE_LOG=0 to suppress
-all allocation logs.
+```sh
+IGPU_GBM_FALLBACK_ENABLE=1 \
+IGPU_GBM_FALLBACK_TARGET=/dev/dri/renderD129 \
+IGPU_GBM_FALLBACK_MODE=deny \
+LD_PRELOAD="$PWD/libigpu_linear_bridge.so" \
+/usr/lib/chromium/chromium \
+  --enable-gpu-rasterization \
+  --ozone-platform=wayland \
+  --render-node-override=/dev/dri/renderD129
+```
 
-## Validation
+`deny` is deliberately opt-in. The default mode is `observe`, and the shim is
+inactive unless `IGPU_GBM_FALLBACK_ENABLE=1` is set.
 
-With force enabled, look for log messages showing the requested modifier list
-and an actual modifier of 0x0000000000000000. Then inspect WAYLAND_DEBUG output
-to confirm that the compositor receives modifier 0, and inspect labwc debug
-logs to confirm the corresponding eglCreateImageKHR calls no longer fail
-with EGL_BAD_MATCH.
+## Scope and limitations
 
-A successful GBM allocation does not prove that Chromium uses these two
-functions for every buffer path. If no bridge log appears, Chromium may be
-using another allocation path or the symbols may not be dynamically
-interposed in that process.
+- This hook only intercepts the dynamically resolved `gbm_create_device` symbol.
+  It cannot intercept a statically linked, hidden, or direct internal call.
+- The match is constrained to Chromium, native Wayland, the exact render-node
+  override, and the configured DRM node.
+- Returning `NULL` makes the GBM device unavailable to every Chromium Wayland
+  code path sharing that device initialization, not just the output Presenter.
+  Other GBM-backed resources may consequently fail. This is a diagnostic
+  fallback experiment, not a guaranteed production fix.
+- The shim does not force the EGL implementation to NVIDIA. Check
+  `GL_VENDOR`/`GL_RENDERER` at runtime; the render-node override and this hook
+  do not independently select the EGL vendor.
+- EGL Wayland window surfaces still exchange buffers with the compositor via
+  the EGL/Wayland driver path. This shim does not bypass compositor import.
+- Do not preload it into the whole desktop session. Use a separate Chromium
+  profile for testing.
+- No GitHub Actions, CI, or remote repository changes are performed by this
+  replacement bundle.
 
-## Limitations and safety
+## Safety boundary
 
-- Test with a separate Chromium profile first.
-- Do not preload this into the entire desktop session.
-- LINEAR allocations may have different performance and memory requirements.
-- A LINEAR allocation can fail for a particular format/usage combination.
-- This is an experimental compatibility shim, not a general-purpose PRIME
-  buffer conversion implementation.
+This implementation performs no GPU rendering, DMA-BUF writes, DMA-BUF reads,
+format conversion, or cross-GPU synchronization. It only observes or denies
+`gbm_create_device()` according to the explicit mode above.
 
 ## License
 
