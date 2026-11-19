@@ -201,7 +201,7 @@ pub unsafe extern "C" fn gbm_bo_get_fd_for_plane(
     bo: *mut GbmBo,
     plane: c_int,
 ) -> c_int {
-    let symbol = unsafe { next(b"gbm_bo_get_fd_for_plane\\0") };
+    let symbol = unsafe { next(b"gbm_bo_get_fd_for_plane\0") };
     if symbol.is_null() { return -1; }
     let real: GetFdForPlane = unsafe { std::mem::transmute(symbol) };
     let fd = unsafe { real(bo, plane) };
@@ -218,7 +218,7 @@ pub unsafe extern "C" fn gbm_bo_get_fd_for_plane(
 
 #[no_mangle]
 pub unsafe extern "C" fn gbm_bo_get_fd(bo: *mut GbmBo) -> c_int {
-    let symbol = unsafe { next(b"gbm_bo_get_fd\\0") };
+    let symbol = unsafe { next(b"gbm_bo_get_fd\0") };
     if symbol.is_null() { return -1; }
     let real: GetFd = unsafe { std::mem::transmute(symbol) };
     let fd = unsafe { real(bo) };
