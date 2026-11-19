@@ -2,6 +2,41 @@ use std::env;
 use std::ffi::{c_char, c_uint, c_void};
 use std::fmt::Write as _;
 use std::ptr;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CREATE_CALLS: AtomicU64 = AtomicU64::new(0);
+static CREATE_MODIFIERS_CALLS: AtomicU64 = AtomicU64::new(0);
+static CREATE_MODIFIERS2_CALLS: AtomicU64 = AtomicU64::new(0);
+static OFF_CALLS: AtomicU64 = AtomicU64::new(0);
+static LINEAR_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static LINEAR_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+static LINEAR_FAILURES: AtomicU64 = AtomicU64::new(0);
+static FALLBACK_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+
+extern "C" fn report_stats() {
+    let create = CREATE_CALLS.load(Ordering::Relaxed);
+    let modifiers = CREATE_MODIFIERS_CALLS.load(Ordering::Relaxed);
+    let modifiers2 = CREATE_MODIFIERS2_CALLS.load(Ordering::Relaxed);
+    let total = create + modifiers + modifiers2;
+    if total == 0 {
+        return;
+    }
+
+    eprintln!(
+        "[igpu-linear-bridge] stats: hooks total={total} create={create} modifiers={modifiers} modifiers2={modifiers2}; off_mode={}; linear attempts={} success={} failed={}; fallback attempts={} success={}",
+        OFF_CALLS.load(Ordering::Relaxed),
+        LINEAR_ATTEMPTS.load(Ordering::Relaxed),
+        LINEAR_SUCCESSES.load(Ordering::Relaxed),
+        LINEAR_FAILURES.load(Ordering::Relaxed),
+        FALLBACK_ATTEMPTS.load(Ordering::Relaxed),
+        FALLBACK_SUCCESSES.load(Ordering::Relaxed),
+    );
+}
+
+#[used]
+#[link_section = ".fini_array"]
+static REPORT_STATS: extern "C" fn() = report_stats;
 
 #[repr(C)]
 struct GbmDevice { _private: [u8; 0] }
@@ -132,6 +167,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
     modifiers: *const u64,
     count: c_uint,
 ) -> *mut GbmBo {
+    CREATE_MODIFIERS_CALLS.fetch_add(1, Ordering::Relaxed);
     let symbol = unsafe { next(b"gbm_bo_create_with_modifiers\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create_with_modifiers symbol not found");
@@ -140,19 +176,25 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
     let real: Create = unsafe { std::mem::transmute(symbol) };
     let selected = mode();
     if selected == Mode::Off {
+        OFF_CALLS.fetch_add(1, Ordering::Relaxed);
         return unsafe { real(device, width, height, format, modifiers, count) };
     }
 
     let linear = [LINEAR];
+    LINEAR_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
     let bo = unsafe { real(device, width, height, format, linear.as_ptr(), 1) };
     if !bo.is_null() {
+        LINEAR_SUCCESSES.fetch_add(1, Ordering::Relaxed);
         log_allocation("create_with_modifiers", width, height, format, None,
             modifier_list(modifiers, count), "linear", bo);
         return bo;
     }
 
+    LINEAR_FAILURES.fetch_add(1, Ordering::Relaxed);
     if selected == Mode::Prefer {
+        FALLBACK_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         let fallback = unsafe { real(device, width, height, format, modifiers, count) };
+        if !fallback.is_null() { FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed); }
         log_allocation("create_with_modifiers", width, height, format, None,
             modifier_list(modifiers, count), "original-list-fallback", fallback);
         return fallback;
@@ -173,6 +215,7 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
     count: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
+    CREATE_MODIFIERS2_CALLS.fetch_add(1, Ordering::Relaxed);
     let symbol = unsafe { next(b"gbm_bo_create_with_modifiers2\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create_with_modifiers2 symbol not found");
@@ -181,19 +224,25 @@ pub unsafe extern "C" fn gbm_bo_create_with_modifiers2(
     let real: Create2 = unsafe { std::mem::transmute(symbol) };
     let selected = mode();
     if selected == Mode::Off {
+        OFF_CALLS.fetch_add(1, Ordering::Relaxed);
         return unsafe { real(device, width, height, format, modifiers, count, flags) };
     }
 
     let linear = [LINEAR];
+    LINEAR_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
     let bo = unsafe { real(device, width, height, format, linear.as_ptr(), 1, flags) };
     if !bo.is_null() {
+        LINEAR_SUCCESSES.fetch_add(1, Ordering::Relaxed);
         log_allocation("create_with_modifiers2", width, height, format, Some(flags),
             modifier_list(modifiers, count), "linear", bo);
         return bo;
     }
 
+    LINEAR_FAILURES.fetch_add(1, Ordering::Relaxed);
     if selected == Mode::Prefer {
+        FALLBACK_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         let fallback = unsafe { real(device, width, height, format, modifiers, count, flags) };
+        if !fallback.is_null() { FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed); }
         log_allocation("create_with_modifiers2", width, height, format, Some(flags),
             modifier_list(modifiers, count), "original-list-fallback", fallback);
         return fallback;
@@ -212,6 +261,7 @@ pub unsafe extern "C" fn gbm_bo_create(
     format: c_uint,
     flags: c_uint,
 ) -> *mut GbmBo {
+    CREATE_CALLS.fetch_add(1, Ordering::Relaxed);
     let symbol = unsafe { next(b"gbm_bo_create\0") };
     if symbol.is_null() {
         log("ERROR: real gbm_bo_create symbol not found");
@@ -220,13 +270,16 @@ pub unsafe extern "C" fn gbm_bo_create(
     let real: CreateBasic = unsafe { std::mem::transmute(symbol) };
     let selected = mode();
     if selected == Mode::Off {
+        OFF_CALLS.fetch_add(1, Ordering::Relaxed);
         return unsafe { real(device, width, height, format, flags) };
     }
 
     // Preserve all caller requirements and additionally request a linear BO.
     let linear_flags = flags | GBM_BO_USE_LINEAR;
+    LINEAR_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
     let bo = unsafe { real(device, width, height, format, linear_flags) };
     if !bo.is_null() {
+        LINEAR_SUCCESSES.fetch_add(1, Ordering::Relaxed);
         log_allocation(
             "create",
             width,
@@ -240,8 +293,11 @@ pub unsafe extern "C" fn gbm_bo_create(
         return bo;
     }
 
+    LINEAR_FAILURES.fetch_add(1, Ordering::Relaxed);
     if selected == Mode::Prefer {
+        FALLBACK_ATTEMPTS.fetch_add(1, Ordering::Relaxed);
         let fallback = unsafe { real(device, width, height, format, flags) };
+        if !fallback.is_null() { FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed); }
         log_allocation(
             "create",
             width,
