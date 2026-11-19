@@ -12,7 +12,7 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <gbm.h>
-#include <drm_fourcc.h>
+#include <libdrm/drm_fourcc.h>
 
 #include <errno.h>
 #include <fcntl.h>
