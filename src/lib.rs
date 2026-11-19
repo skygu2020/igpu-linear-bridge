@@ -23,7 +23,7 @@ fn raw_stderr(message: &'static [u8]) {
 }
 
 extern "C" fn bridge_loaded() {
-    raw_stderr(b"[igpu-linear-bridge] loaded\\n");
+    raw_stderr(b"[igpu-linear-bridge] loaded\n");
 }
 
 #[used]
@@ -35,7 +35,7 @@ static FIRST_HOOK_REPORTED: std::sync::atomic::AtomicBool =
 
 fn report_first_hook() {
     if !FIRST_HOOK_REPORTED.swap(true, Ordering::Relaxed) {
-        raw_stderr(b"[igpu-linear-bridge] first GBM hook entered\\n");
+        raw_stderr(b"[igpu-linear-bridge] first GBM hook entered\n");
     }
 }
 
