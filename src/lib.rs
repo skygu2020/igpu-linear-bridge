@@ -13,6 +13,8 @@ static LINEAR_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 static LINEAR_FAILURES: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+static EXPORT_PLANE_CALLS: AtomicU64 = AtomicU64::new(0);
+static EXPORT_FD_CALLS: AtomicU64 = AtomicU64::new(0);
 static IMPORT_CALLS: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_CALLS: AtomicU64 = AtomicU64::new(0);
 static IMPORT_MODIFIER_SUCCESSES: AtomicU64 = AtomicU64::new(0);
@@ -182,6 +184,53 @@ unsafe fn actual_modifier(bo: *mut GbmBo) -> Option<u64> {
     if symbol.is_null() { return None; }
     let get: GetModifier = unsafe { std::mem::transmute(symbol) };
     Some(unsafe { get(bo) })
+}
+unsafe fn actual_modifier(bo: *mut GbmBo) -> Option<u64> {
+    let symbol = unsafe { next(b"gbm_bo_get_modifier\0") };
+    if symbol.is_null() { return None; }
+    let get: GetModifier = unsafe { std::mem::transmute(symbol) };
+    Some(unsafe { get(bo) })
+}
+
+
+type GetFdForPlane = unsafe extern "C" fn(*mut GbmBo, c_int) -> c_int;
+type GetFd = unsafe extern "C" fn(*mut GbmBo) -> c_int;
+
+#[no_mangle]
+pub unsafe extern "C" fn gbm_bo_get_fd_for_plane(
+    bo: *mut GbmBo,
+    plane: c_int,
+) -> c_int {
+    let symbol = unsafe { next(b"gbm_bo_get_fd_for_plane\\0") };
+    if symbol.is_null() { return -1; }
+    let real: GetFdForPlane = unsafe { std::mem::transmute(symbol) };
+    let fd = unsafe { real(bo, plane) };
+    let call = EXPORT_PLANE_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+    if call <= 64 && log_enabled() {
+        let modifier = unsafe { actual_modifier(bo) };
+        eprintln!(
+            "[igpu-linear-bridge] export_plane #{call} bo={bo:p} plane={plane} fd={fd} modifier={}",
+            modifier.map(|v| format!("0x{v:016x}")).unwrap_or_else(|| "<unavailable>".to_string())
+        );
+    }
+    fd
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn gbm_bo_get_fd(bo: *mut GbmBo) -> c_int {
+    let symbol = unsafe { next(b"gbm_bo_get_fd\\0") };
+    if symbol.is_null() { return -1; }
+    let real: GetFd = unsafe { std::mem::transmute(symbol) };
+    let fd = unsafe { real(bo) };
+    let call = EXPORT_FD_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+    if call <= 64 && log_enabled() {
+        let modifier = unsafe { actual_modifier(bo) };
+        eprintln!(
+            "[igpu-linear-bridge] export_fd #{call} bo={bo:p} fd={fd} modifier={}",
+            modifier.map(|v| format!("0x{v:016x}")).unwrap_or_else(|| "<unavailable>".to_string())
+        );
+    }
+    fd
 }
 
 fn modifier_list(ptr: *const u64, count: c_uint) -> String {
