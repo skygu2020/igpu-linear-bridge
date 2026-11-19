@@ -20,6 +20,7 @@ static IMPORT_MODIFIER_FAILURES: AtomicU64 = AtomicU64::new(0);
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
     fn __errno_location() -> *mut c_int;
+    fn dup(fd: c_int) -> c_int;
 }
 
 fn raw_stderr(message: &'static [u8]) {
@@ -91,6 +92,15 @@ type GetModifier = unsafe extern "C" fn(*mut GbmBo) -> u64;
 type Import = unsafe extern "C" fn(*mut GbmDevice, c_uint, *mut c_void, c_uint) -> *mut GbmBo;
 
 #[repr(C)]
+struct GbmImportFdData {
+    fd: c_int,
+    width: c_uint,
+    height: c_uint,
+    stride: c_uint,
+    format: c_uint,
+}
+
+#[repr(C)]
 struct GbmImportFdModifierData {
     width: c_uint,
     height: c_uint,
@@ -102,7 +112,10 @@ struct GbmImportFdModifierData {
     modifier: u64,
 }
 
+const GBM_BO_IMPORT_FD: c_uint = 0x5503;
 const GBM_BO_IMPORT_FD_MODIFIER: c_uint = 0x5504;
+static LEGACY_IMPORT_DIAG_RAN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 const LINEAR: u64 = 0;
 const GBM_BO_USE_LINEAR: c_uint = 1 << 4;
@@ -247,6 +260,55 @@ pub unsafe extern "C" fn gbm_bo_import(
             if data.num_fds > 0 && data.num_fds <= 4 { data.offsets[0] } else { -1 },
             data.modifier
         );
+    }
+    if bo.is_null()
+        && data.width == 1
+        && data.height == 1
+        && data.num_fds == 1
+        && data.modifier == LINEAR
+        && env::var("IGPU_LINEAR_BRIDGE_DIAG_LEGACY_IMPORT").as_deref() == Ok("1")
+        && !LEGACY_IMPORT_DIAG_RAN.swap(true, Ordering::Relaxed)
+    {
+        // Diagnostic only: duplicate the exported dma-buf so the original FD
+        // remains untouched. Keep the duplicate open because GBM backend FD
+        // ownership is backend-specific and undocumented by the public API.
+        for usage in [flags, 0] {
+            let probe_fd = unsafe { dup(data.fds[0]) };
+            if probe_fd < 0 {
+                eprintln!("[igpu-linear-bridge] legacy_import_diag dup failed errno={}", unsafe { *__errno_location() });
+                break;
+            }
+            let mut legacy = GbmImportFdData {
+                fd: probe_fd,
+                width: data.width,
+                height: data.height,
+                stride: data.strides[0] as c_uint,
+                format: data.format,
+            };
+            let legacy_bo = unsafe {
+                real(device, GBM_BO_IMPORT_FD, (&mut legacy as *mut GbmImportFdData).cast(), usage)
+            };
+            let legacy_errno = unsafe { *__errno_location() };
+            eprintln!(
+                "[igpu-linear-bridge] legacy_import_diag {}x{} format=0x{:08x} fd={} stride={} flags=0x{usage:08x} errno={} {}",
+                legacy.width,
+                legacy.height,
+                legacy.format,
+                legacy.fd,
+                legacy.stride,
+                legacy_errno,
+                if legacy_bo.is_null() { "FAILED" } else { "OK" }
+            );
+            if !legacy_bo.is_null() {
+                let destroy_symbol = unsafe { next(b"gbm_bo_destroy\\0") };
+                if !destroy_symbol.is_null() {
+                    let destroy: unsafe extern "C" fn(*mut GbmBo) =
+                        unsafe { std::mem::transmute(destroy_symbol) };
+                    unsafe { destroy(legacy_bo) };
+                }
+                break;
+            }
+        }
     }
     bo
 }
