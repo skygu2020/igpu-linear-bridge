@@ -85,14 +85,14 @@ int main(int argc, char **argv) {
   if (argc > 2) {
     egl_drm_fd = open(egl_node, O_RDWR | O_CLOEXEC);
     if (egl_drm_fd < 0) {
-      fprintf(stderr, "open EGL device %s: %s\\n", egl_node, strerror(errno));
+      fprintf(stderr, "open EGL device %s: %s\n", egl_node, strerror(errno));
       gbm_device_destroy(gbm);
       close(drm_fd);
       return 1;
     }
     egl_gbm = gbm_create_device(egl_drm_fd);
     if (!egl_gbm) {
-      fprintf(stderr, "gbm_create_device(%s) failed\\n", egl_node);
+      fprintf(stderr, "gbm_create_device(%s) failed\n", egl_node);
       close(egl_drm_fd);
       gbm_device_destroy(gbm);
       close(drm_fd);
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
   }
 
   fprintf(stderr,
-          "DMA-BUF allocator: %s; EGL importer: %s; format=AB24 size=%dx%d modifier=LINEAR\\n",
+          "DMA-BUF allocator: %s; EGL importer: %s; format=AB24 size=%dx%d modifier=LINEAR\n",
           node, egl_node, width, height);
 
   const uint64_t linear = DRM_FORMAT_MOD_LINEAR;
