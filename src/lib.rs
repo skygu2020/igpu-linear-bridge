@@ -13,6 +13,9 @@ static LINEAR_SUCCESSES: AtomicU64 = AtomicU64::new(0);
 static LINEAR_FAILURES: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 static FALLBACK_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+static IMPORT_MODIFIER_CALLS: AtomicU64 = AtomicU64::new(0);
+static IMPORT_MODIFIER_SUCCESSES: AtomicU64 = AtomicU64::new(0);
+static IMPORT_MODIFIER_FAILURES: AtomicU64 = AtomicU64::new(0);
 
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
@@ -49,13 +52,16 @@ extern "C" fn report_stats() {
     }
 
     eprintln!(
-        "[igpu-linear-bridge] stats: hooks total={total} create={create} modifiers={modifiers} modifiers2={modifiers2}; off_mode={}; linear attempts={} success={} failed={}; fallback attempts={} success={}",
+        "[igpu-linear-bridge] stats: hooks total={total} create={create} modifiers={modifiers} modifiers2={modifiers2}; off_mode={}; linear attempts={} success={} failed={}; fallback attempts={} success={}; import_fd_modifier calls={} success={} failed={}",
         OFF_CALLS.load(Ordering::Relaxed),
         LINEAR_ATTEMPTS.load(Ordering::Relaxed),
         LINEAR_SUCCESSES.load(Ordering::Relaxed),
         LINEAR_FAILURES.load(Ordering::Relaxed),
         FALLBACK_ATTEMPTS.load(Ordering::Relaxed),
         FALLBACK_SUCCESSES.load(Ordering::Relaxed),
+        IMPORT_MODIFIER_CALLS.load(Ordering::Relaxed),
+        IMPORT_MODIFIER_SUCCESSES.load(Ordering::Relaxed),
+        IMPORT_MODIFIER_FAILURES.load(Ordering::Relaxed),
     );
 }
 
@@ -81,6 +87,21 @@ type Create2 = unsafe extern "C" fn(
 ) -> *mut GbmBo;
 
 type GetModifier = unsafe extern "C" fn(*mut GbmBo) -> u64;
+type Import = unsafe extern "C" fn(*mut GbmDevice, c_uint, *mut c_void, c_uint) -> *mut GbmBo;
+
+#[repr(C)]
+struct GbmImportFdModifierData {
+    width: c_uint,
+    height: c_uint,
+    format: c_uint,
+    num_fds: c_uint,
+    fds: [i32; 4],
+    strides: [i32; 4],
+    offsets: [i32; 4],
+    modifier: u64,
+}
+
+const GBM_BO_IMPORT_FD_MODIFIER: c_uint = 0x5504;
 
 const LINEAR: u64 = 0;
 const GBM_BO_USE_LINEAR: c_uint = 1 << 4;
@@ -183,6 +204,43 @@ fn log_allocation(
     );
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn gbm_bo_import(
+    device: *mut GbmDevice,
+    import_type: c_uint,
+    buffer: *mut c_void,
+    flags: c_uint,
+) -> *mut GbmBo {
+    let symbol = unsafe { next(b"gbm_bo_import\0") };
+    if symbol.is_null() {
+        log("ERROR: real gbm_bo_import symbol not found");
+        return ptr::null_mut();
+    }
+    let real: Import = unsafe { std::mem::transmute(symbol) };
+
+    if import_type != GBM_BO_IMPORT_FD_MODIFIER || buffer.is_null() {
+        return unsafe { real(device, import_type, buffer, flags) };
+    }
+
+    let data = unsafe { &*(buffer.cast::<GbmImportFdModifierData>()) };
+    let call = IMPORT_MODIFIER_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+    let bo = unsafe { real(device, import_type, buffer, flags) };
+    if bo.is_null() {
+        IMPORT_MODIFIER_FAILURES.fetch_add(1, Ordering::Relaxed);
+    } else {
+        IMPORT_MODIFIER_SUCCESSES.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // Keep diagnostics bounded: Chromium may perform this probe in a tight loop.
+    if call <= 32 && log_enabled() {
+        let outcome = if bo.is_null() { "FAILED" } else { "OK" };
+        eprintln!(
+            "[igpu-linear-bridge] import_fd_modifier #{call} {}x{} format=0x{:08x} num_fds={} modifier=0x{:016x} flags=0x{flags:08x} {outcome}",
+            data.width, data.height, data.format, data.num_fds, data.modifier
+        );
+    }
+    bo
+}
 #[no_mangle]
 pub unsafe extern "C" fn gbm_bo_create_with_modifiers(
     device: *mut GbmDevice,
