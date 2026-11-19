@@ -1,5 +1,5 @@
 use std::env;
-use std::ffi::{c_char, c_uint, c_void};
+use std::ffi::{c_char, c_int, c_uint, c_void};
 use std::fmt::Write as _;
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,6 +19,7 @@ static IMPORT_MODIFIER_FAILURES: AtomicU64 = AtomicU64::new(0);
 
 unsafe extern "C" {
     fn write(fd: i32, buf: *const u8, count: usize) -> isize;
+    fn __errno_location() -> *mut c_int;
 }
 
 fn raw_stderr(message: &'static [u8]) {
@@ -225,6 +226,7 @@ pub unsafe extern "C" fn gbm_bo_import(
     let data = unsafe { &*(buffer.cast::<GbmImportFdModifierData>()) };
     let call = IMPORT_MODIFIER_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
     let bo = unsafe { real(device, import_type, buffer, flags) };
+    let errno = unsafe { *__errno_location() };
     if bo.is_null() {
         IMPORT_MODIFIER_FAILURES.fetch_add(1, Ordering::Relaxed);
     } else {
@@ -235,8 +237,15 @@ pub unsafe extern "C" fn gbm_bo_import(
     if call <= 32 && log_enabled() {
         let outcome = if bo.is_null() { "FAILED" } else { "OK" };
         eprintln!(
-            "[igpu-linear-bridge] import_fd_modifier #{call} {}x{} format=0x{:08x} num_fds={} modifier=0x{:016x} flags=0x{flags:08x} {outcome}",
-            data.width, data.height, data.format, data.num_fds, data.modifier
+            "[igpu-linear-bridge] import_fd_modifier #{call} {}x{} format=0x{:08x} num_fds={} fd0={} stride0={} offset0={} modifier=0x{:016x} flags=0x{flags:08x} errno={errno} {outcome}",
+            data.width,
+            data.height,
+            data.format,
+            data.num_fds,
+            if data.num_fds > 0 && data.num_fds <= 4 { data.fds[0] } else { -1 },
+            if data.num_fds > 0 && data.num_fds <= 4 { data.strides[0] } else { -1 },
+            if data.num_fds > 0 && data.num_fds <= 4 { data.offsets[0] } else { -1 },
+            data.modifier
         );
     }
     bo
