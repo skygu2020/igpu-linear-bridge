@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +13,7 @@
 #include <unistd.h>
 
 struct gbm_device;
-typedef struct gbm_device *(*int fd);
+typedef struct gbm_device *(*gbm_create_device_fn)(int fd);
 
 static unsigned long g_calls;
 static unsigned long g_denied;
@@ -144,24 +145,36 @@ static void bridge_init(void)
 __attribute__((visibility("default")))
 struct gbm_device *gbm_create_device(int fd)
 {
-    static gbm_create_device_fn real_fn;
-    if (!real_fn)
-        real_fn = resolve_real();
-    if (!real_fn) {
+    static _Atomic(gbm_create_device_fn) real_fn;
+    gbm_create_device_fn real = atomic_load_explicit(&real_fn, memory_order_acquire);
+    if (!real) {
+        gbm_create_device_fn resolved = resolve_real();
+        if (resolved) {
+            gbm_create_device_fn expected = NULL;
+            if (!atomic_compare_exchange_strong_explicit(
+                    &real_fn, &expected, resolved,
+                    memory_order_release, memory_order_acquire)) {
+                real = expected;
+            } else {
+                real = resolved;
+            }
+        }
+    }
+    if (!real) {
         errno = ENOSYS;
         return NULL;
     }
 
     const char *enabled = getenv("IGPU_GBM_FALLBACK_ENABLE");
     if (!enabled || strcmp(enabled, "1") != 0)
-        return real_fn(fd);
+        return real(fd);
 
     const char *target = getenv("IGPU_GBM_FALLBACK_TARGET");
     if (!target || !*target)
         target = "/dev/dri/renderD129";
 
     if (!is_chromium_wayland_target(target) || !fd_matches_target_node(fd, target))
-        return real_fn(fd);
+        return real(fd);
 
     unsigned long call = __atomic_add_fetch(&g_calls, 1, __ATOMIC_RELAXED);
     const char *mode = getenv("IGPU_GBM_FALLBACK_MODE");
@@ -186,7 +199,7 @@ struct gbm_device *gbm_create_device(int fd)
         log_line("[igpu-linear-bridge] gbm_create_device #%lu fd=%d target=%s caller=%s -> passthrough (mode=%s)\n",
                  call, fd, target, caller, mode);
     }
-    return real_fn(fd);
+    return real(fd);
 }
 
 __attribute__((destructor))
