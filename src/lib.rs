@@ -274,7 +274,7 @@ pub unsafe extern "C" fn gbm_bo_import(
         && data.offsets[0] == 0
         && env::var("IGPU_LINEAR_BRIDGE_LINEAR_IMPORT_FALLBACK").as_deref() == Ok("1")
     {
-        LEGACY_IMPORT_FALLBACK_CALLS.fetch_add(1, Ordering::Relaxed);
+        let fallback_call = LEGACY_IMPORT_FALLBACK_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
         let mut legacy = GbmImportFdData {
             fd: data.fds[0],
             width: data.width,
@@ -289,20 +289,24 @@ pub unsafe extern "C" fn gbm_bo_import(
         if !legacy_bo.is_null() {
             LEGACY_IMPORT_FALLBACK_SUCCESSES.fetch_add(1, Ordering::Relaxed);
             let imported_modifier = unsafe { actual_modifier(legacy_bo) };
-            eprintln!(
-                "[igpu-linear-bridge] linear_import_fallback {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} legacy_modifier={} OK",
-                data.width,
-                data.height,
-                data.format,
-                data.strides[0],
-                imported_modifier.map(|v| format!("0x{v:016x}")).unwrap_or_else(|| "<unavailable>".to_string())
-            );
+            if fallback_call <= 32 {
+                eprintln!(
+                    "[igpu-linear-bridge] linear_import_fallback #{fallback_call} {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} legacy_modifier={} OK",
+                    data.width,
+                    data.height,
+                    data.format,
+                    data.strides[0],
+                    imported_modifier.map(|v| format!("0x{v:016x}")).unwrap_or_else(|| "<unavailable>".to_string())
+                );
+            }
             return legacy_bo;
         }
-        eprintln!(
-            "[igpu-linear-bridge] linear_import_fallback {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} errno={} FAILED",
-            data.width, data.height, data.format, data.strides[0], legacy_errno
-        );
+        if fallback_call <= 32 {
+            eprintln!(
+                "[igpu-linear-bridge] linear_import_fallback #{fallback_call} {}x{} format=0x{:08x} stride={} flags=0x{flags:08x} errno={} FAILED",
+                data.width, data.height, data.format, data.strides[0], legacy_errno
+            );
+        }
     }
     if bo.is_null()
         && data.width == 1
