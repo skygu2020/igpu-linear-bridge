@@ -54,8 +54,11 @@ affected.
 - prefer: try LINEAR first, then retry the original modifier list if LINEAR
   allocation fails. This mode may still return a non-LINEAR allocation.
 
-Logging is enabled by default when the bridge is active. Set
-IGPU_LINEAR_BRIDGE_LOG=0 to suppress it.
+Logging is enabled by default when the bridge is active. By default, allocations
+smaller than 2x2 are omitted from the log (they are still intercepted and
+handled normally). Set IGPU_LINEAR_BRIDGE_MIN_SIZE=1 to include 1x1 probes,
+or choose another minimum dimension. Set IGPU_LINEAR_BRIDGE_LOG=0 to suppress
+all allocation logs.
 
 ## Validation
 
