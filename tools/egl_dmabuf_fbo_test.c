@@ -419,23 +419,23 @@ int main(int argc, char **argv) {
   if (dmabuf_fbo_status == GL_FRAMEBUFFER_COMPLETE && gl_error == GL_NO_ERROR) {
     const GLubyte expected[4] = {64, 128, 191, 255};
     GLubyte actual[4] = {0, 0, 0, 0};
-    fprintf(stderr, "DMA-BUF write test: begin\\n");
+    fprintf(stderr, "DMA-BUF write test: begin\n");
     glViewport(0, 0, width, height);
-    fprintf(stderr, "DMA-BUF write test: viewport set\\n");
+    fprintf(stderr, "DMA-BUF write test: viewport set\n");
     glDisable(GL_SCISSOR_TEST);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glClearColor(64.0f / 255.0f, 128.0f / 255.0f,
                  191.0f / 255.0f, 1.0f);
-    fprintf(stderr, "DMA-BUF write test: before glClear\\n");
+    fprintf(stderr, "DMA-BUF write test: before glClear\n");
     glClear(GL_COLOR_BUFFER_BIT);
-    fprintf(stderr, "DMA-BUF write test: after glClear\\n");
+    fprintf(stderr, "DMA-BUF write test: after glClear\n");
     GLenum clear_error = glGetError();
-    fprintf(stderr, "DMA-BUF write test: after clear glGetError=0x%04x\\n",
+    fprintf(stderr, "DMA-BUF write test: after clear glGetError=0x%04x\n",
             clear_error);
-    fprintf(stderr, "DMA-BUF write test: before glReadPixels\\n");
+    fprintf(stderr, "DMA-BUF write test: before glReadPixels\n");
     glReadPixels(width / 2, height / 2, 1, 1, GL_RGBA,
                  GL_UNSIGNED_BYTE, actual);
-    fprintf(stderr, "DMA-BUF write test: after glReadPixels\\n");
+    fprintf(stderr, "DMA-BUF write test: after glReadPixels\n");
     GLenum read_error = glGetError();
     dmabuf_write_ok = clear_error == GL_NO_ERROR &&
                       read_error == GL_NO_ERROR &&
