@@ -158,6 +158,73 @@ int main(int argc, char **argv) {
     return 7;
   }
 
+  // EGL import success does not imply GL_TEXTURE_2D support: the driver
+  // may advertise a modifier as external_only, in which case only
+  // GL_TEXTURE_EXTERNAL_OES is valid.
+  PFNEGLQUERYDMABUFFORMATSEXTPROC query_formats =
+      (PFNEGLQUERYDMABUFFORMATSEXTPROC)eglGetProcAddress(
+          "eglQueryDmaBufFormatsEXT");
+  PFNEGLQUERYDMABUFMODIFIERSEXTPROC query_modifiers =
+      (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)eglGetProcAddress(
+          "eglQueryDmaBufModifiersEXT");
+  if (query_formats && query_modifiers) {
+    EGLint format_count = 0;
+    EGLBoolean format_ok = query_formats(display, 0, NULL, &format_count);
+    EGLint *formats = format_count > 0
+                          ? calloc((size_t)format_count, sizeof(*formats))
+                          : NULL;
+    EGLBoolean has_ab24 = EGL_FALSE;
+    if (format_ok && formats &&
+        query_formats(display, format_count, formats, &format_count)) {
+      for (EGLint i = 0; i < format_count; ++i) {
+        if ((uint32_t)formats[i] == DRM_FORMAT_ABGR8888) {
+          has_ab24 = EGL_TRUE;
+          break;
+        }
+      }
+    }
+    fprintf(stderr, "EGL advertises AB24: %s\n",
+            has_ab24 ? "yes" : "no");
+    free(formats);
+
+    if (has_ab24) {
+      EGLint modifier_count = 0;
+      if (query_modifiers(display, DRM_FORMAT_ABGR8888, 0, NULL, NULL,
+                          &modifier_count)) {
+        EGLuint64KHR *modifiers =
+            modifier_count > 0
+                ? calloc((size_t)modifier_count, sizeof(*modifiers))
+                : NULL;
+        EGLBoolean *external_only =
+            modifier_count > 0
+                ? calloc((size_t)modifier_count, sizeof(*external_only))
+                : NULL;
+        if (modifier_count == 0 ||
+            (modifiers && external_only &&
+             query_modifiers(display, DRM_FORMAT_ABGR8888, modifier_count,
+                             modifiers, external_only, &modifier_count))) {
+          for (EGLint i = 0; i < modifier_count; ++i) {
+            fprintf(stderr,
+                    "EGL AB24 modifier=0x%016llx external_only=%s%s\n",
+                    (unsigned long long)modifiers[i],
+                    external_only[i] ? "TRUE" : "FALSE",
+                    modifiers[i] == DRM_FORMAT_MOD_LINEAR
+                        ? " [LINEAR]"
+                        : "");
+          }
+        } else {
+          fprintf(stderr, "eglQueryDmaBufModifiersEXT(AB24) failed\n");
+        }
+        free(external_only);
+        free(modifiers);
+      } else {
+        fprintf(stderr, "eglQueryDmaBufModifiersEXT(AB24) query failed\n");
+      }
+    }
+  } else {
+    fprintf(stderr, "EGL dma-buf query entry points unavailable\n");
+  }
+
   if (!eglBindAPI(EGL_OPENGL_ES_API)) {
     print_egl_error("eglBindAPI");
     return 8;
